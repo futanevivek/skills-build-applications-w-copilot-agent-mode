@@ -1,64 +1,52 @@
 from django.core.management.base import BaseCommand
-from pymongo import MongoClient
-from bson import ObjectId
-from octofit_tracker.test_data import test_users, test_teams, test_activities, test_leaderboard, test_workouts
+from octofit_tracker.models import User, Team, Activity, Leaderboard, Workout
+from octofit_tracker.test_data import test_data
 
 class Command(BaseCommand):
     help = 'Populate the database with test data for users, teams, activities, leaderboard, and workouts'
 
     def handle(self, *args, **kwargs):
-        # Connect to MongoDB
-        client = MongoClient('localhost', 27017)
-        db = client['octofit_db']
+        try:
+            # Clear existing data
+            User.objects.all().delete()
+            Team.objects.all().delete()
+            Activity.objects.all().delete()
+            Leaderboard.objects.all().delete()
+            Workout.objects.all().delete()
 
-        # Drop existing collections
-        db.users.drop()
-        db.teams.drop()
-        db.activities.drop()
-        db.leaderboard.drop()
-        db.workouts.drop()
+            # Populate users
+            users = [User(**user) for user in test_data['users']]
+            User.objects.bulk_create(users)
 
-        # Insert users
-        print("Inserting users...")
-        for user in test_users:
-            user["_id"] = ObjectId()
-            db.users.insert_one(user)
-            print(f"Inserted User: {user['username']}, Email: {user['email']}")
+            # Refresh users from the database to ensure proper references
+            users = list(User.objects.all())
 
-        # Insert teams
-        print("Inserting teams...")
-        for team in test_teams:
-            team["_id"] = ObjectId()
-            db.teams.insert_one(team)
-            print(f"Inserted Team: {team['name']}")
+            # Populate teams and assign members
+            teams = []
+            for i, team_data in enumerate(test_data['teams']):
+                team = Team(name=team_data['name'])
+                team.save()
+                team.members.add(*users[i::len(test_data['teams'])])  # Distribute users across teams
+                teams.append(team)
 
-        # Insert activities
-        print("Inserting activities...")
-        for activity in test_activities:
-            user = db.users.find_one({"username": activity["username"]})
-            if user:
-                activity["_id"] = ObjectId()
-                activity["user_id"] = user["_id"]
-                del activity["username"]
-                db.activities.insert_one(activity)
-                print(f"Inserted Activity: {activity['activity_type']}, User: {user['username']}")
+            # Populate activities
+            activities = [
+                Activity(**{**activity, 'user': users[i % len(users)]})
+                for i, activity in enumerate(test_data['activities'])
+            ]
+            Activity.objects.bulk_create(activities)
 
-        # Insert leaderboard entries
-        print("Inserting leaderboard entries...")
-        for entry in test_leaderboard:
-            user = db.users.find_one({"username": entry["username"]})
-            if user:
-                entry["_id"] = ObjectId()
-                entry["user_id"] = user["_id"]
-                del entry["username"]
-                db.leaderboard.insert_one(entry)
-                print(f"Inserted Leaderboard Entry: User: {user['username']}, Score: {entry['score']}")
+            # Populate leaderboard
+            leaderboard_entries = [
+                Leaderboard(**{**entry, 'user': users[i % len(users)]})
+                for i, entry in enumerate(test_data['leaderboard'])
+            ]
+            Leaderboard.objects.bulk_create(leaderboard_entries)
 
-        # Insert workouts
-        print("Inserting workouts...")
-        for workout in test_workouts:
-            workout["_id"] = ObjectId()
-            db.workouts.insert_one(workout)
-            print(f"Inserted Workout: {workout['name']}, Description: {workout['description']}")
+            # Populate workouts
+            workouts = [Workout(**workout) for workout in test_data['workouts']]
+            Workout.objects.bulk_create(workouts)
 
-        print("Successfully populated the database with test data.")
+            self.stdout.write(self.style.SUCCESS('Successfully populated the database with test data.'))
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f'Error populating the database: {e}'))
