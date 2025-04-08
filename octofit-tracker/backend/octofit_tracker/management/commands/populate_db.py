@@ -1,3 +1,4 @@
+#
 from django.core.management.base import BaseCommand
 from octofit_tracker.models import User, Team, Activity, Leaderboard, Workout
 from octofit_tracker.test_data import test_data
